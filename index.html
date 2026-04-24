@@ -7,6 +7,7 @@
 
 <!-- SheetJS supports Excel parsing. Internet is required for XLSX upload unless this library is bundled locally. CSV works without it. -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
 :root {
@@ -268,6 +269,41 @@ td {
   font-size:14px;
 }
 
+
+.filter-bar {
+  display:grid;
+  grid-template-columns: 1fr 1fr 1fr auto auto;
+  gap:12px;
+  align-items:end;
+  background:#f7f7f7;
+  border-left:4px solid var(--green);
+  padding:16px;
+  margin:18px 0 20px;
+}
+
+.filter-bar label {
+  display:block;
+  color:#666;
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  font-weight:700;
+  margin-bottom:6px;
+}
+
+.filter-bar button {
+  margin-top:0;
+  height:39px;
+}
+
+.clear-button {
+  background:#000;
+}
+
+@media(max-width:1000px){
+  .filter-bar {grid-template-columns:1fr;}
+}
+
 @media(max-width:1000px){
   .actions,.grid,.metrics {grid-template-columns:1fr;}
   .header {flex-direction:column;}
@@ -299,7 +335,7 @@ td {
       <div>
         <h3>Task Intake</h3>
         <p>Upload Loop / Planner tasks</p>
-        <div class="helper">Accepts CSV or Excel (.xlsx)</div>
+        <div class="helper">Accepts PDF, CSV, or Excel (.xlsx)</div>
       </div>
     </div>
 
@@ -313,10 +349,10 @@ td {
     </div>
   </div>
 
-  <input id="taskFile" type="file" accept=".csv,.xlsx,.xls" onchange="handleFile(event,'Task Intake')" />
+  <input id="taskFile" type="file" accept=".pdf,.csv,.xlsx,.xls" onchange="handleFile(event,'Task Intake')" />
   
 
-  <div class="status-message" id="message">Use Task Intake to upload CSV/Excel data or Manual Task Entry to add one-off tasks. The top-right trend circle updates dynamically from all entered data.</div>
+  <div class="status-message" id="message">Use Task Intake to upload PDF, CSV, or Excel data, or Manual Task Entry to add one-off tasks. The top-right trend circle updates dynamically from all entered data.</div>
 
   <div class="panel" id="manualPanel">
     <div class="grid">
@@ -338,6 +374,29 @@ td {
     <button onclick="saveManualTask()">Save Manual Task</button>
   </div>
 
+
+
+  <div class="filter-bar">
+    <div>
+      <label for="ownerFilter">Filter by Owner</label>
+      <input id="ownerFilter" placeholder="Owner name" oninput="render()" />
+    </div>
+    <div>
+      <label for="dueDateFilter">Filter by Due Date</label>
+      <input id="dueDateFilter" type="date" onchange="render()" />
+    </div>
+    <div>
+      <label for="progressFilter">Progress</label>
+      <select id="progressFilter" onchange="render()">
+        <option value="">All</option>
+        <option value="not started">Not Started</option>
+        <option value="in progress">In Progress</option>
+        <option value="complete">Complete</option>
+    </select>
+    </div>
+    <button onclick="clearFilters()">Clear Filters</button>
+    <button class="clear-button" onclick="clearData()">Clear Data</button>
+  </div>
 
   <div class="metrics">
     <div class="metric"><div class="num" id="total">0</div><div class="label">Total Tasks</div></div>
@@ -402,11 +461,93 @@ function handleFile(event, defaultSource){
       ingestRows(rows, defaultSource, file.name);
     };
     reader.readAsArrayBuffer(file);
+  } else if(name.endsWith(".pdf")){
+    const reader = new FileReader();
+    reader.onload = async e => {
+      if(typeof pdfjsLib === "undefined"){
+        alert("PDF support needs the PDF.js library. Please connect to the internet or convert the PDF to CSV/Excel.");
+        return;
+      }
+
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        const typedArray = new Uint8Array(e.target.result);
+        const pdf = await pdfjsLib.getDocument({data: typedArray}).promise;
+        let fullText = "";
+
+        for(let pageNum = 1; pageNum <= pdf.numPages; pageNum++){
+          const page = await pdf.getPage(pageNum);
+          const content = await page.getTextContent();
+          const pageText = content.items.map(item => item.str).join(" ");
+          fullText += pageText + "\n";
+        }
+
+        const rows = pdfTextToRows(fullText);
+        ingestRows(rows, defaultSource, file.name);
+      } catch(error){
+        console.error(error);
+        alert("Could not parse this PDF. Please try CSV/Excel or a text-based PDF.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
   } else {
-    alert("Please upload a CSV or Excel file.");
+    alert("Please upload a PDF, CSV, or Excel file.");
   }
 
   event.target.value = "";
+}
+
+function pdfTextToRows(text){
+  const rows = [];
+
+  // Looks for numbered Loop-style action items:
+  // 1. Task text [Action: Owner, due]
+  const itemPattern = /(?:^|\s)(\d{1,2})\.\s+(.+?)(?=(?:\s\d{1,2}\.\s+)|$)/gs;
+  let match;
+
+  while((match = itemPattern.exec(text)) !== null){
+    const raw = match[2].trim();
+    const actionMatch = raw.match(/\[Action:\s*([^\]]+)\]/i);
+
+    let task = raw.replace(/\[Action:[^\]]+\]/i, "").trim();
+    let owner = "TBD";
+    let due = "TBD";
+
+    if(actionMatch){
+      const parts = actionMatch[1].split(",").map(x => x.trim()).filter(Boolean);
+      if(parts.length > 1){
+        due = parts[parts.length - 1];
+        owner = parts.slice(0, -1).join(", ");
+      } else if(parts.length === 1){
+        owner = parts[0];
+      }
+    }
+
+    rows.push({
+      Source: "PDF / Loop",
+      Task: task,
+      Owner: owner,
+      "Due Date": due,
+      Status: "Not Started"
+    });
+  }
+
+  // Fallback: each non-empty PDF line becomes a task if numbered parsing found nothing.
+  if(rows.length === 0){
+    text.split(/\n|•/).map(x => x.trim()).filter(Boolean).forEach(line => {
+      if(line.length > 8){
+        rows.push({
+          Source: "PDF",
+          Task: line,
+          Owner: "TBD",
+          "Due Date": "TBD",
+          Status: "Not Started"
+        });
+      }
+    });
+  }
+
+  return rows;
 }
 
 function csvToObjects(csv){
@@ -668,15 +809,51 @@ function updateTrendCircle(){
   circle.classList.add(overallTrend + "-trend");
 }
 
+
+function getFilteredTasks(){
+  const ownerValue = (document.getElementById("ownerFilter")?.value || "").toLowerCase().trim();
+  const dueValue = document.getElementById("dueDateFilter")?.value || "";
+  const progressValue = (document.getElementById("progressFilter")?.value || "").toLowerCase().trim();
+
+  return tasks.filter(t => {
+    const ownerMatch = !ownerValue || String(t.owner || "").toLowerCase().includes(ownerValue);
+    const dueMatch = !dueValue || String(t.date || "") === dueValue;
+
+    // Progress is now a column filter, not a threshold.
+    // It matches the displayed Progress field, e.g., "50%", "Complete", "In Progress".
+    const progressMatch = !progressValue || String(t.progress || "").toLowerCase().includes(progressValue);
+
+    return ownerMatch && dueMatch && progressMatch;
+  });
+}
+
+function clearFilters(){
+  document.getElementById("ownerFilter").value = "";
+  document.getElementById("dueDateFilter").value = "";
+  document.getElementById("progressFilter").value = "";
+  render();
+}
+
+function clearData(){
+  if(!confirm("Clear all uploaded and manually entered task data?")) return;
+  tasks = [];
+  render();
+  document.getElementById("message").textContent = "Data cleared. Upload a PDF, CSV, or Excel file to populate the report.";
+}
+
 function render(){
   const tbody = document.getElementById("body");
   tbody.innerHTML = "";
 
+  const visibleTasks = getFilteredTasks();
+
   if(tasks.length === 0){
     tbody.innerHTML = '<tr><td colspan="8" style="color:#777;font-style:italic;">No task data uploaded yet.</td></tr>';
+  } else if(visibleTasks.length === 0){
+    tbody.innerHTML = '<tr><td colspan="8" style="color:#777;font-style:italic;">No tasks match the current filters.</td></tr>';
   }
 
-  tasks.forEach(t => {
+  visibleTasks.forEach(t => {
     tbody.innerHTML += `
       <tr>
         <td>${escapeHtml(t.source)}</td>
