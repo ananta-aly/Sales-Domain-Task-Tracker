@@ -707,7 +707,7 @@ function parseTaskWithAction(text){
   }
 
   return {
-    task: cleanTaskText(text),
+    task: toSentenceCase(cleanTaskText(text)),
     owner: "",
     dueDate: ""
   };
@@ -757,7 +757,7 @@ function ingestRows(rows, defaultSource, fileName){
 
   rows.forEach(row => {
     const item = normalizeRow(row, defaultSource);
-    if(item.task){
+    if(item.task && !isInvalidTaskHeader(item.task)){
       tasks.push(item);
       added++;
     }
@@ -807,7 +807,7 @@ function normalizeRow(row, defaultSource){
 
   return {
     source: get("Source","Origin","System") || defaultSource,
-    task: cleanTaskText(task),
+    task: toSentenceCase(cleanTaskText(task)),
     owner: owner && !isTbd(owner) ? owner : "",
     date: dueDate && !isTbd(dueDate) ? normalizeDueDateText(dueDate) : "",
     status: normalizeProgress(status),
@@ -1009,6 +1009,51 @@ function extractTasksFromNotes(){
   ingestRows(extracted, "Notes / Transcript", "notes/transcript input");
 }
 
+
+function isInvalidTaskHeader(text){
+  const v = String(text || "").trim().toLowerCase().replace(/[:\-–—]+$/,"");
+  const invalidHeaders = [
+    "action item",
+    "action items",
+    "key action item",
+    "key action items",
+    "actions",
+    "next steps",
+    "follow ups",
+    "follow-ups",
+    "notes",
+    "meeting notes",
+    "summary",
+    "decisions",
+    "open items"
+  ];
+  return invalidHeaders.includes(v);
+}
+
+function toSentenceCase(text){
+  let value = String(text || "").trim();
+  if(!value) return "";
+
+  // Preserve obvious acronyms / abbreviations by only lowercasing fully uppercase phrases
+  // when they are longer natural-language strings.
+  value = value.replace(/\s+/g, " ");
+
+  if(value === value.toUpperCase() && value.length > 12){
+    value = value.toLowerCase();
+  }
+
+  value = value.charAt(0).toUpperCase() + value.slice(1);
+
+  // Common business acronyms to keep uppercase
+  const acronyms = ["AI", "IRIS", "PMO", "PMD", "SM", "USI", "GTM", "POV", "QRM", "OGC", "BPaaS", "FY"];
+  acronyms.forEach(a => {
+    const re = new RegExp("\\b" + a.toLowerCase() + "\\b", "gi");
+    value = value.replace(re, a);
+  });
+
+  return value;
+}
+
 function notesTextToRows(text){
   const rows = [];
   const cleaned = cleanNotesText(text);
@@ -1016,7 +1061,8 @@ function notesTextToRows(text){
   const candidates = cleaned
     .split(/\n|•|;|(?:^|\s)\d{1,2}\.\s+/)
     .map(x => x.trim())
-    .filter(x => x.length > 8);
+    .filter(x => x.length > 8)
+    .filter(x => !isInvalidTaskHeader(x));
 
   candidates.forEach(line => {
     const expanded = splitMultipleActions(line);
@@ -1058,12 +1104,12 @@ function splitMultipleActions(line){
 
 function parseTaskFromNoteLine(line){
   let text = cleanTaskText(line);
-  if(!text) return null;
+  if(!text || isInvalidTaskHeader(text)) return null;
 
   const loopParsed = parseLoopActionBlock(text);
   if(loopParsed){
     return {
-      task: cleanTaskText(loopParsed.task),
+      task: toSentenceCase(cleanTaskText(loopParsed.task)),
       owner: loopParsed.owner || "",
       dueDate: loopParsed.dueDate || "",
       progress: "Not Started"
@@ -1108,7 +1154,7 @@ function parseTaskFromNoteLine(line){
   if(!owner && !dueDate && !looksActionLike(text)) return null;
 
   return {
-    task: cleanTaskText(text),
+    task: toSentenceCase(cleanTaskText(text)),
     owner: cleanTaskText(owner),
     dueDate: dueDate,
     progress: progress || "Not Started"
@@ -1170,7 +1216,7 @@ function saveManualTask(){
 
   tasks.unshift({
     source: "Manual Entry",
-    task: cleanTaskText(manualTask.value.trim()),
+    task: toSentenceCase(cleanTaskText(manualTask.value.trim())),
     owner: manualOwner.value.trim(),
     date: manualDate.value,
     status: manualStatus.value,
