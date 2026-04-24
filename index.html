@@ -180,7 +180,7 @@ input[type="file"] {
 
 .grid {
   display:grid;
-  grid-template-columns:repeat(5,1fr);
+  grid-template-columns:repeat(4,1fr);
   gap:10px;
 }
 
@@ -231,7 +231,19 @@ table {
   width:100%;
   border-collapse:collapse;
   border-top:2px solid #000;
+  table-layout:fixed;
 }
+
+th, td {
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+
+th:nth-child(1), td:nth-child(1) { width:58%; }
+th:nth-child(2), td:nth-child(2) { width:22%; }
+th:nth-child(3), td:nth-child(3) { width:12%; }
+th:nth-child(4), td:nth-child(4) { width:8%; }
 
 th {
   text-align:left;
@@ -359,16 +371,10 @@ td {
       <input id="manualTask" placeholder="Task">
       <input id="manualOwner" placeholder="Owner">
       <input id="manualDate" type="date">
-      <select id="manualSource">
-        <option>Loop</option>
-        <option>Planner</option>
-        <option>Manual Intake</option>
-      </select>
       <select id="manualStatus">
-        <option>Green</option>
-        <option>Yellow</option>
-        <option>Red</option>
         <option>Not Started</option>
+        <option>In Progress</option>
+        <option>Complete</option>
       </select>
     </div>
     <button onclick="saveManualTask()">Save Manual Task</button>
@@ -392,7 +398,7 @@ td {
         <option value="not started">Not Started</option>
         <option value="in progress">In Progress</option>
         <option value="complete">Complete</option>
-    </select>
+      </select>
     </div>
     <button onclick="clearFilters()">Clear Filters</button>
     <button class="clear-button" onclick="clearData()">Clear Data</button>
@@ -408,18 +414,14 @@ td {
   <table>
     <thead>
       <tr>
-        <th>Source</th>
         <th>Task</th>
         <th>Owner</th>
         <th>Due Date</th>
-        <th>Health</th>
-        <th>Priority</th>
         <th>Progress</th>
-        <th>Next Step</th>
       </tr>
     </thead>
     <tbody id="body">
-      <tr><td colspan="8" style="color:#777;font-style:italic;">No task data uploaded yet.</td></tr>
+      <tr><td colspan="4" style="color:#777;font-style:italic;">No task data uploaded yet.</td></tr>
     </tbody>
   </table>
 
@@ -525,10 +527,10 @@ function pdfTextToRows(text){
 
     rows.push({
       Source: "PDF / Loop",
-      Task: task,
-      Owner: owner,
-      "Due Date": due,
-      Status: "Not Started"
+      Task: task + (actionMatch ? " [Action: " + actionMatch[1] + "]" : ""),
+      Owner: owner === "TBD" ? "" : owner,
+      "Due Date": due === "TBD" ? "" : due,
+      Status: ""
     });
   }
 
@@ -540,8 +542,8 @@ function pdfTextToRows(text){
           Source: "PDF",
           Task: line,
           Owner: "TBD",
-          "Due Date": "TBD",
-          Status: "Not Started"
+          "Due Date": "",
+          Status: ""
         });
       }
     });
@@ -616,18 +618,119 @@ function normalizeRow(row, defaultSource){
     return "";
   };
 
-  let status = get("Health","RAG","Status","Task Status","Bucket","Progress Status") || "Not Started";
+  let task = get("Task","Task Name","Title","Action Item","Action","Name","Description");
+  let owner = get("Owner","Assigned To","Assignee","Responsible","Action Owner");
+  let dueDate = get("Due Date","Due","Deadline","Target Date","Finish Date");
+  let status = get("Progress","Percent Complete","% Complete","Completion","Complete","Status","Task Status") || "Not Started";
+
+  const parsedAction = parseLoopActionBlock(task);
+
+  if(parsedAction){
+    task = parsedAction.task || task;
+    owner = owner || parsedAction.owner;
+    dueDate = dueDate || parsedAction.dueDate;
+  }
+
+  const health = get("Health","RAG");
+  const priority = get("Priority","Importance");
+  const nextStep = get("Next Step","Next Action","Notes","Comments");
+
+  const additions = [];
+  if(health && !isTbd(health)) additions.push("Health: " + health);
+  if(priority && !isTbd(priority)) additions.push("Priority: " + priority);
+  if(nextStep && !isTbd(nextStep) && !sameText(nextStep, task)) additions.push("Next Step: " + nextStep);
+
+  if(additions.length){
+    task = task + " | " + additions.join(" | ");
+  }
 
   return {
     source: get("Source","Origin","System") || defaultSource,
-    task: get("Task","Task Name","Title","Action Item","Action","Name","Description"),
-    owner: get("Owner","Assigned To","Assignee","Responsible","Action Owner") || "TBD",
-    date: get("Due Date","Due","Deadline","Target Date","Finish Date") || "TBD",
-    status: normalizeStatus(status),
-    priority: get("Priority","Importance") || "TBD",
-    progress: get("Progress","Percent Complete","% Complete","Completion","Complete") || "TBD",
-    next: get("Next Step","Next Action","Notes","Comments","Description") || "TBD"
+    task: cleanTaskText(task),
+    owner: owner && !isTbd(owner) ? owner : "",
+    date: dueDate && !isTbd(dueDate) ? normalizeDueDateText(dueDate) : "",
+    status: normalizeProgress(status),
+    priority: "",
+    progress: normalizeProgress(status),
+    next: ""
   };
+}
+
+function parseLoopActionBlock(taskText){
+  if(!taskText) return null;
+
+  const actionMatch = String(taskText).match(/\[\s*Action\s*:\s*([^\]]+)\]/i);
+  if(!actionMatch) return null;
+
+  const actionContent = actionMatch[1]
+    .replace(/\s+\./g, ".")
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*/g, ", ")
+    .trim();
+
+  const parts = actionContent.split(",").map(x => x.trim()).filter(Boolean);
+  let dueDate = "";
+  let owner = "";
+
+  if(parts.length > 1){
+    const possibleDue = parts[parts.length - 1];
+    dueDate = normalizeDueDateText(possibleDue);
+    owner = parts.slice(0, -1).join(", ");
+  } else if(parts.length === 1){
+    owner = parts[0];
+  }
+
+  const cleanTask = String(taskText).replace(/\[\s*Action\s*:\s*[^\]]+\]/i, "").trim();
+
+  return {
+    task: cleanTask,
+    owner,
+    dueDate
+  };
+}
+
+function cleanTaskText(value){
+  return String(value || "")
+    .replace(/\s+\./g, ".")
+    .replace(/\s+,/g, ",")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeDueDateText(value){
+  const v = String(value || "").trim().replace(/\s+\./g, ".").replace(/\.$/, "");
+  const lower = v.toLowerCase();
+
+  if(lower === "tmr" || lower === "tomorrow") return "Tomorrow";
+  if(lower === "today") return "Today";
+  if(lower === "wed") return "Wed";
+  if(lower === "thu" || lower === "thurs") return "Thu";
+  if(lower === "fri") return "Fri";
+  if(lower === "mon") return "Mon";
+  if(lower === "tue" || lower === "tues") return "Tue";
+
+  return v;
+}
+
+function isTbd(value){
+  const v = String(value || "").trim().toLowerCase();
+  return v === "" || v === "tbd" || v === "-" || v === "n/a" || v === "na" || v === "not stated";
+}
+
+function sameText(a,b){
+  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+}
+
+function normalizeProgress(value){
+  const v = String(value || "").trim();
+  const lower = v.toLowerCase();
+
+  if(isTbd(v)) return "";
+  if(lower.includes("complete") || lower === "done" || lower === "green") return "Complete";
+  if(lower.includes("not started") || lower === "red") return "Not Started";
+  if(lower.includes("in progress") || lower === "yellow" || lower.includes("progress")) return "In Progress";
+
+  return v;
 }
 
 function clean(value){
@@ -653,19 +756,20 @@ function saveManualTask(){
   }
 
   tasks.unshift({
-    source: manualSource.value,
-    task: manualTask.value.trim(),
-    owner: manualOwner.value.trim() || "TBD",
-    date: manualDate.value || "TBD",
+    source: "Manual Entry",
+    task: cleanTaskText(manualTask.value.trim()),
+    owner: manualOwner.value.trim(),
+    date: manualDate.value,
     status: manualStatus.value,
-    priority: "TBD",
-    progress: "TBD",
-    next: "TBD"
+    priority: "",
+    progress: manualStatus.value,
+    next: ""
   });
 
   manualTask.value = "";
   manualOwner.value = "";
   manualDate.value = "";
+  manualStatus.value = "Not Started";
   render();
 }
 
@@ -819,9 +923,7 @@ function getFilteredTasks(){
     const ownerMatch = !ownerValue || String(t.owner || "").toLowerCase().includes(ownerValue);
     const dueMatch = !dueValue || String(t.date || "") === dueValue;
 
-    // Progress is now a column filter, not a threshold.
-    // It matches the displayed Progress field, e.g., "50%", "Complete", "In Progress".
-    const progressMatch = !progressValue || String(t.progress || "").toLowerCase().includes(progressValue);
+    const progressMatch = !progressValue || String(t.progress || "").toLowerCase() === progressValue;
 
     return ownerMatch && dueMatch && progressMatch;
   });
@@ -848,22 +950,18 @@ function render(){
   const visibleTasks = getFilteredTasks();
 
   if(tasks.length === 0){
-    tbody.innerHTML = '<tr><td colspan="8" style="color:#777;font-style:italic;">No task data uploaded yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" style="color:#777;font-style:italic;">No task data uploaded yet.</td></tr>';
   } else if(visibleTasks.length === 0){
-    tbody.innerHTML = '<tr><td colspan="8" style="color:#777;font-style:italic;">No tasks match the current filters.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" style="color:#777;font-style:italic;">No tasks match the current filters.</td></tr>';
   }
 
   visibleTasks.forEach(t => {
     tbody.innerHTML += `
       <tr>
-        <td>${escapeHtml(t.source)}</td>
         <td>${escapeHtml(t.task)}</td>
         <td>${escapeHtml(t.owner)}</td>
         <td>${escapeHtml(t.date)}</td>
-        <td><span class="rag ${ragClass(t.status)}">${escapeHtml(t.status)}</span></td>
-        <td>${escapeHtml(t.priority)}</td>
         <td>${escapeHtml(t.progress)}</td>
-        <td>${escapeHtml(t.next)}</td>
       </tr>`;
   });
 
