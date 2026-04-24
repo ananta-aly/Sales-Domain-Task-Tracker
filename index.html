@@ -501,48 +501,65 @@ function handleFile(event, defaultSource){
 
 function pdfTextToRows(text){
   const rows = [];
+  const normalizedText = String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/([0-9]{1,2}\.)\s+/g, " $1 ")
+    .replace(/\s([a-d])\.\s/gi, " $1. ");
 
-  // Looks for numbered Loop-style action items:
-  // 1. Task text [Action: Owner, due]
+  // Split top-level numbered items: 1. ... 2. ... 21. Marketing a. ... b. ...
   const itemPattern = /(?:^|\s)(\d{1,2})\.\s+(.+?)(?=(?:\s\d{1,2}\.\s+)|$)/gs;
   let match;
 
-  while((match = itemPattern.exec(text)) !== null){
-    const raw = match[2].trim();
-    const actionMatch = raw.match(/\[Action:\s*([^\]]+)\]/i);
+  while((match = itemPattern.exec(normalizedText)) !== null){
+    const number = match[1];
+    const rawItem = match[2].trim();
 
-    let task = raw.replace(/\[Action:[^\]]+\]/i, "").trim();
-    let owner = "TBD";
-    let due = "TBD";
+    // Split lettered subbullets when present, e.g. Marketing a. Gartner... b. Conferences...
+    const subbulletPattern = /\s([a-z])\.\s+/gi;
+    const subMatches = [...rawItem.matchAll(subbulletPattern)];
 
-    if(actionMatch){
-      const parts = actionMatch[1].split(",").map(x => x.trim()).filter(Boolean);
-      if(parts.length > 1){
-        due = parts[parts.length - 1];
-        owner = parts.slice(0, -1).join(", ");
-      } else if(parts.length === 1){
-        owner = parts[0];
+    if(subMatches.length > 0){
+      const parentTitle = rawItem.slice(0, subMatches[0].index).trim().replace(/[:\-–—]+$/, "");
+      for(let i = 0; i < subMatches.length; i++){
+        const label = subMatches[i][1];
+        const start = subMatches[i].index + subMatches[i][0].length;
+        const end = i + 1 < subMatches.length ? subMatches[i + 1].index : rawItem.length;
+        const subText = rawItem.slice(start, end).trim();
+        const parsed = parseTaskWithAction(`${parentTitle}: ${subText}`);
+        if(parsed.task){
+          rows.push({
+            Source: "PDF / Loop",
+            Task: parsed.task,
+            Owner: parsed.owner,
+            "Due Date": parsed.dueDate,
+            Status: ""
+          });
+        }
+      }
+    } else {
+      const parsed = parseTaskWithAction(rawItem);
+      if(parsed.task){
+        rows.push({
+          Source: "PDF / Loop",
+          Task: parsed.task,
+          Owner: parsed.owner,
+          "Due Date": parsed.dueDate,
+          Status: ""
+        });
       }
     }
-
-    rows.push({
-      Source: "PDF / Loop",
-      Task: task + (actionMatch ? " [Action: " + actionMatch[1] + "]" : ""),
-      Owner: owner === "TBD" ? "" : owner,
-      "Due Date": due === "TBD" ? "" : due,
-      Status: ""
-    });
   }
 
   // Fallback: each non-empty PDF line becomes a task if numbered parsing found nothing.
   if(rows.length === 0){
     text.split(/\n|•/).map(x => x.trim()).filter(Boolean).forEach(line => {
       if(line.length > 8){
+        const parsed = parseTaskWithAction(line);
         rows.push({
           Source: "PDF",
-          Task: line,
-          Owner: "TBD",
-          "Due Date": "",
+          Task: parsed.task,
+          Owner: parsed.owner,
+          "Due Date": parsed.dueDate,
           Status: ""
         });
       }
@@ -550,6 +567,23 @@ function pdfTextToRows(text){
   }
 
   return rows;
+}
+
+function parseTaskWithAction(text){
+  const parsedAction = parseLoopActionBlock(text);
+  if(parsedAction){
+    return {
+      task: cleanTaskText(parsedAction.task),
+      owner: parsedAction.owner || "",
+      dueDate: parsedAction.dueDate || ""
+    };
+  }
+
+  return {
+    task: cleanTaskText(text),
+    owner: "",
+    dueDate: ""
+  };
 }
 
 function csvToObjects(csv){
@@ -697,17 +731,86 @@ function cleanTaskText(value){
     .trim();
 }
 
+function formatDateMMDDYY(date){
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const yy = String(date.getFullYear()).slice(-2);
+  return `${mm}/${dd}/${yy}`;
+}
+
+function getUploadWeekDateForDay(dayName){
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  const dayMap = {
+    "sun": 0,
+    "sunday": 0,
+    "mon": 1,
+    "monday": 1,
+    "tue": 2,
+    "tues": 2,
+    "tuesday": 2,
+    "wed": 3,
+    "wednesday": 3,
+    "thu": 4,
+    "thur": 4,
+    "thurs": 4,
+    "thursday": 4,
+    "fri": 5,
+    "friday": 5,
+    "sat": 6,
+    "saturday": 6
+  };
+
+  const targetDay = dayMap[String(dayName || "").toLowerCase()];
+  if(targetDay === undefined) return "";
+
+  // Week starts Sunday, matching normal JS Date week behavior.
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay());
+
+  const targetDate = new Date(startOfWeek);
+  targetDate.setDate(startOfWeek.getDate() + targetDay);
+
+  return formatDateMMDDYY(targetDate);
+}
+
 function normalizeDueDateText(value){
   const v = String(value || "").trim().replace(/\s+\./g, ".").replace(/\.$/, "");
   const lower = v.toLowerCase();
 
-  if(lower === "tmr" || lower === "tomorrow") return "Tomorrow";
-  if(lower === "today") return "Today";
-  if(lower === "wed") return "Wed";
-  if(lower === "thu" || lower === "thurs") return "Thu";
-  if(lower === "fri") return "Fri";
-  if(lower === "mon") return "Mon";
-  if(lower === "tue" || lower === "tues") return "Tue";
+  if(isTbd(v)) return "";
+
+  if(lower === "today") return formatDateMMDDYY(new Date());
+
+  if(lower === "tmr" || lower === "tomorrow"){
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return formatDateMMDDYY(tomorrow);
+  }
+
+  const weekdayDate = getUploadWeekDateForDay(lower);
+  if(weekdayDate) return weekdayDate;
+
+  // Handles M/D or MM/DD by adding 2026 as the year.
+  const partialDate = v.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if(partialDate){
+    const mm = partialDate[1].padStart(2, "0");
+    const dd = partialDate[2].padStart(2, "0");
+    return `${mm}/${dd}/26`;
+  }
+
+  // Handles M/D/YY or M/D/YYYY and standardizes to MM/DD/YY.
+  const fullDate = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  if(fullDate){
+    const mm = fullDate[1].padStart(2, "0");
+    const dd = fullDate[2].padStart(2, "0");
+    const yy = fullDate[3].length === 4 ? fullDate[3].slice(-2) : fullDate[3];
+    return `${mm}/${dd}/${yy}`;
+  }
+
+  const parsed = new Date(v);
+  if(!isNaN(parsed.getTime())) return formatDateMMDDYY(parsed);
 
   return v;
 }
@@ -916,13 +1019,21 @@ function updateTrendCircle(){
 
 function getFilteredTasks(){
   const ownerValue = (document.getElementById("ownerFilter")?.value || "").toLowerCase().trim();
-  const dueValue = document.getElementById("dueDateFilter")?.value || "";
+  const dueValueRaw = document.getElementById("dueDateFilter")?.value || "";
   const progressValue = (document.getElementById("progressFilter")?.value || "").toLowerCase().trim();
+
+  let dueValue = "";
+  if(dueValueRaw){
+    const dateParts = dueValueRaw.split("-");
+    if(dateParts.length === 3){
+      dueValue = `${dateParts[1]}/${dateParts[2]}/${dateParts[0].slice(-2)}`;
+    }
+  }
 
   return tasks.filter(t => {
     const ownerMatch = !ownerValue || String(t.owner || "").toLowerCase().includes(ownerValue);
-    const dueMatch = !dueValue || String(t.date || "") === dueValue;
-
+    const taskDue = normalizeDueDateText(t.date);
+    const dueMatch = !dueValue || taskDue === dueValue;
     const progressMatch = !progressValue || String(t.progress || "").toLowerCase() === progressValue;
 
     return ownerMatch && dueMatch && progressMatch;
@@ -960,7 +1071,7 @@ function render(){
       <tr>
         <td>${escapeHtml(t.task)}</td>
         <td>${escapeHtml(t.owner)}</td>
-        <td>${escapeHtml(t.date)}</td>
+        <td>${escapeHtml(normalizeDueDateText(t.date))}</td>
         <td>${escapeHtml(t.progress)}</td>
       </tr>`;
   });
