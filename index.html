@@ -137,7 +137,7 @@ h1 em {
 
 .actions {
   display:grid;
-  grid-template-columns:1fr 1fr;
+  grid-template-columns:1fr 1fr 1fr;
   gap:20px;
   margin-bottom:30px;
 }
@@ -201,6 +201,28 @@ input[type="file"] {
 
 .panel.active {
   display:block;
+}
+
+.notes-grid {
+  display:grid;
+  grid-template-columns:1fr;
+  gap:10px;
+}
+
+.notes-grid textarea {
+  min-height:180px;
+  resize:vertical;
+  padding:10px;
+  border:1px solid var(--border);
+  font-family:Arial, Helvetica, sans-serif;
+  font-size:14px;
+  box-sizing:border-box;
+  width:100%;
+}
+
+.secondary-button {
+  background:#000;
+  margin-left:8px;
 }
 
 .grid {
@@ -432,11 +454,21 @@ td {
         <div class="helper">Use for ad hoc actions captured live</div>
       </div>
     </div>
+
+    <div class="card" onclick="toggleNotesPanel()">
+      <div class="icon">✎</div>
+      <div>
+        <h3>Notes / Transcript Intake</h3>
+        <p>Extract tasks from notes</p>
+        <div class="helper">Paste notes or upload .txt transcript</div>
+      </div>
+    </div>
   </div>
 
   <input id="taskFile" type="file" accept=".pdf,.csv,.xlsx,.xls" onchange="handleFile(event,'Task Intake')" />
+  <input id="notesFile" type="file" accept=".txt,.md,.csv" onchange="handleNotesFile(event)" />
 
-  <div class="status-message" id="message">Select the Due Date Reference Week first, then upload PDF, CSV, or Excel data, or use Manual Task Entry. The top-right trend circle updates dynamically from all entered data.</div>
+  <div class="status-message" id="message">Select the Due Date Reference Week first, then upload Loop/Planner files, paste notes/transcripts, or use Manual Task Entry. The top-right trend circle updates dynamically from all entered data.</div>
 
   <div class="panel" id="manualPanel">
     <div class="grid">
@@ -450,6 +482,19 @@ td {
       </select>
     </div>
     <button onclick="saveManualTask()">Save Manual Task</button>
+  </div>
+
+  <div class="panel" id="notesPanel">
+    <div class="notes-grid">
+      <textarea id="notesText" placeholder="Paste meeting notes or transcript here. Example: Avery to align portfolio recommendations by Fri."></textarea>
+      <div>
+        <button onclick="extractTasksFromNotes()">Extract Tasks from Notes</button>
+        <button class="secondary-button" onclick="document.getElementById('notesFile').click()">Upload .txt Notes</button>
+      </div>
+      <div class="helper">
+        Looks for action language such as owner + action + due date, including “Avery to align... by Fri”, “Action: Chris, Fri”, or “Chris - task due 1/5”.
+      </div>
+    </div>
   </div>
 
   <div class="filter-bar">
@@ -933,6 +978,185 @@ function normalizeProgress(value){
 function clean(value){
   return String(value).toLowerCase().replace(/[^a-z0-9]/g,"");
 }
+
+
+function toggleNotesPanel(){
+  document.getElementById("notesPanel").classList.toggle("active");
+}
+
+function handleNotesFile(event){
+  const file = event.target.files[0];
+  if(!file) return;
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById("notesText").value = e.target.result;
+    document.getElementById("notesPanel").classList.add("active");
+    extractTasksFromNotes();
+  };
+  reader.readAsText(file);
+  event.target.value = "";
+}
+
+function extractTasksFromNotes(){
+  const rawText = document.getElementById("notesText").value.trim();
+  if(!rawText){
+    alert("Please paste or upload notes/transcript text first.");
+    return;
+  }
+
+  const extracted = notesTextToRows(rawText);
+  ingestRows(extracted, "Notes / Transcript", "notes/transcript input");
+}
+
+function notesTextToRows(text){
+  const rows = [];
+  const cleaned = cleanNotesText(text);
+
+  const candidates = cleaned
+    .split(/\n|•|;|(?:^|\s)\d{1,2}\.\s+/)
+    .map(x => x.trim())
+    .filter(x => x.length > 8);
+
+  candidates.forEach(line => {
+    const expanded = splitMultipleActions(line);
+    expanded.forEach(item => {
+      const parsed = parseTaskFromNoteLine(item);
+      if(parsed && parsed.task){
+        rows.push({
+          Source: "Notes / Transcript",
+          Task: parsed.task,
+          Owner: parsed.owner,
+          "Due Date": parsed.dueDate,
+          Status: parsed.progress || "Not Started"
+        });
+      }
+    });
+  });
+
+  return rows;
+}
+
+function cleanNotesText(text){
+  return String(text || "")
+    .replace(/\r/g, "\n")
+    .replace(/\t/g, " ")
+    .replace(/\s+\./g, ".")
+    .replace(/\s+,/g, ",")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[ ]{2,}/g, " ")
+    .trim();
+}
+
+function splitMultipleActions(line){
+  return String(line)
+    .split(/\s+\|\s+|(?:\s+and\s+)(?=[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+(?:to|will|should|needs to|needs|follow up|send|share|align|confirm|schedule|create|update|review))/g)
+    .map(x => x.trim())
+    .filter(Boolean);
+}
+
+function parseTaskFromNoteLine(line){
+  let text = cleanTaskText(line);
+  if(!text) return null;
+
+  const loopParsed = parseLoopActionBlock(text);
+  if(loopParsed){
+    return {
+      task: cleanTaskText(loopParsed.task),
+      owner: loopParsed.owner || "",
+      dueDate: loopParsed.dueDate || "",
+      progress: "Not Started"
+    };
+  }
+
+  let owner = "";
+  let dueDate = "";
+
+  let actionPrefix = text.match(/^(?:action|owner|owners?)\s*:\s*([^,\-\|]+(?:,\s*[^,\-\|]+)*)(?:,\s*([^-\|]+))?\s*(?:-|\|)?\s*(.*)$/i);
+  if(actionPrefix){
+    owner = actionPrefix[1] || "";
+    dueDate = extractDueDate(actionPrefix[2] || "");
+    text = actionPrefix[3] || text;
+  }
+
+  if(!owner){
+    const ownerTo = text.match(/^([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)?(?:,\s*[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)?)*)\s+(?:to|will|should|needs to|needs|is to)\s+(.+)$/);
+    if(ownerTo){
+      owner = ownerTo[1].trim();
+      text = ownerTo[2].trim();
+    }
+  }
+
+  if(!owner){
+    const dashOwner = text.match(/^([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)?(?:,\s*[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)?)*)\s*[-–—]\s*(.+)$/);
+    if(dashOwner){
+      owner = dashOwner[1].trim();
+      text = dashOwner[2].trim();
+    }
+  }
+
+  const due = extractDueDate(text);
+  if(due){
+    dueDate = due;
+    text = removeDueDatePhrase(text);
+  }
+
+  const progress = extractProgress(text);
+  text = removeProgressPhrase(text);
+
+  if(!owner && !dueDate && !looksActionLike(text)) return null;
+
+  return {
+    task: cleanTaskText(text),
+    owner: cleanTaskText(owner),
+    dueDate: dueDate,
+    progress: progress || "Not Started"
+  };
+}
+
+function looksActionLike(text){
+  const v = String(text || "").toLowerCase();
+  return /\b(action|follow up|send|share|align|confirm|schedule|create|update|review|prepare|draft|connect|finalize|document|build|discuss|circle back|bring|flag|close)\b/.test(v);
+}
+
+function extractDueDate(text){
+  const v = String(text || "").trim();
+
+  const duePatterns = [
+    /\b(?:by|due|before|on)\s+(asap|today|tomorrow|tmr|mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/i,
+    /\b(asap|today|tomorrow|tmr|mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b$/i
+  ];
+
+  for(const pattern of duePatterns){
+    const match = v.match(pattern);
+    if(match && match[1]) return normalizeDueDateText(match[1]);
+  }
+
+  return "";
+}
+
+function removeDueDatePhrase(text){
+  return String(text || "")
+    .replace(/\b(?:by|due|before|on)\s+(asap|today|tomorrow|tmr|mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/ig, "")
+    .replace(/\b(asap|today|tomorrow|tmr|mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b$/ig, "")
+    .trim();
+}
+
+function extractProgress(text){
+  const v = String(text || "").toLowerCase();
+  if(/\b(complete|completed|done)\b/.test(v)) return "Complete";
+  if(/\b(in progress|started|working on)\b/.test(v)) return "In Progress";
+  if(/\b(not started|open|todo|to do)\b/.test(v)) return "Not Started";
+  return "";
+}
+
+function removeProgressPhrase(text){
+  return String(text || "")
+    .replace(/\b(status|progress)\s*:\s*(complete|completed|done|in progress|started|working on|not started|open|todo|to do)\b/ig, "")
+    .trim();
+}
+
 
 function toggleManual(){
   document.getElementById("manualPanel").classList.toggle("active");
