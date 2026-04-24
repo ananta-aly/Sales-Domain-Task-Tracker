@@ -738,39 +738,46 @@ function formatDateMMDDYY(date){
   return `${mm}/${dd}/${yy}`;
 }
 
-function getUploadWeekDateForDay(dayName){
+function getUploadWeekMonday(){
   const today = new Date();
   today.setHours(0,0,0,0);
 
+  // Monday-based week. If upload happens on Friday 04/24/26,
+  // Monday is 04/20/26 and Friday is 04/24/26.
+  const day = today.getDay(); // Sun=0, Mon=1, ... Sat=6
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diffToMonday);
+  return monday;
+}
+
+function getUploadWeekDateForDay(dayName){
   const dayMap = {
-    "sun": 0,
-    "sunday": 0,
-    "mon": 1,
-    "monday": 1,
-    "tue": 2,
-    "tues": 2,
-    "tuesday": 2,
-    "wed": 3,
-    "wednesday": 3,
-    "thu": 4,
-    "thur": 4,
-    "thurs": 4,
-    "thursday": 4,
-    "fri": 5,
-    "friday": 5,
-    "sat": 6,
-    "saturday": 6
+    "mon": 0,
+    "monday": 0,
+    "tue": 1,
+    "tues": 1,
+    "tuesday": 1,
+    "wed": 2,
+    "wednesday": 2,
+    "thu": 3,
+    "thur": 3,
+    "thurs": 3,
+    "thursday": 3,
+    "fri": 4,
+    "friday": 4,
+    "sat": 5,
+    "saturday": 5,
+    "sun": 6,
+    "sunday": 6
   };
 
-  const targetDay = dayMap[String(dayName || "").toLowerCase()];
-  if(targetDay === undefined) return "";
+  const offset = dayMap[String(dayName || "").toLowerCase()];
+  if(offset === undefined) return "";
 
-  // Week starts Sunday, matching normal JS Date week behavior.
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay());
-
-  const targetDate = new Date(startOfWeek);
-  targetDate.setDate(startOfWeek.getDate() + targetDay);
+  const targetDate = getUploadWeekMonday();
+  targetDate.setDate(targetDate.getDate() + offset);
 
   return formatDateMMDDYY(targetDate);
 }
@@ -781,7 +788,8 @@ function normalizeDueDateText(value){
 
   if(isTbd(v)) return "";
 
-  if(lower === "today") return formatDateMMDDYY(new Date());
+  // Per requested PMO convention, ASAP and today map to Monday of the upload week.
+  if(lower === "asap" || lower === "today") return formatDateMMDDYY(getUploadWeekMonday());
 
   if(lower === "tmr" || lower === "tomorrow"){
     const tomorrow = new Date();
