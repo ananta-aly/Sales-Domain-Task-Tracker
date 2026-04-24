@@ -347,6 +347,28 @@ td {
   .filter-bar {grid-template-columns:1fr;}
 }
 
+.report-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:12px;
+  margin:24px 0 0;
+}
+
+.report-actions button {
+  margin-top:0;
+}
+
+.download-button {
+  background:#000;
+}
+
+@media(max-width:1000px){
+  .report-actions {
+    justify-content:stretch;
+    flex-direction:column;
+  }
+}
+
 @media(max-width:1000px){
   .actions,.grid,.metrics {grid-template-columns:1fr;}
   .header {flex-direction:column;}
@@ -466,6 +488,11 @@ td {
       <tr><td colspan="4" style="color:#777;font-style:italic;">No task data uploaded yet.</td></tr>
     </tbody>
   </table>
+
+
+  <div class="report-actions">
+    <button class="download-button" onclick="downloadReport()">Download Generated Report</button>
+  </div>
 
 </div>
 
@@ -1142,6 +1169,86 @@ function render(){
   red.textContent = trendCounts.red;
   updateTrendCircle();
 }
+
+
+function downloadReport(){
+  const visibleTasks = getFilteredTasks();
+  const generatedText = document.getElementById("generated")?.textContent || "";
+  const referenceWeek = document.getElementById("referenceWeekStart")?.value || "Not selected";
+
+  const rows = visibleTasks.map(t => `
+    <tr>
+      <td>${escapeHtml(t.task)}</td>
+      <td>${escapeHtml(t.owner)}</td>
+      <td>${escapeHtml(normalizeDueDateText(t.date))}</td>
+      <td>${escapeHtml(t.progress)}</td>
+    </tr>
+  `).join("");
+
+  const reportHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sales Domain Task Tracking Report</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; margin: 32px; color: #000; }
+  .eyebrow { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: #666; font-weight: 700; }
+  h1 { font-size: 42px; font-weight: 300; margin: 18px 0 8px; }
+  h1 em { color: #86BC25; font-family: Georgia, serif; font-weight: 700; }
+  .meta { color: #666; margin-bottom: 24px; line-height: 1.5; }
+  .divider { border: 0; border-top: 3px solid #000; margin: 24px 0; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; border-top: 2px solid #000; }
+  th, td { padding: 11px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; overflow-wrap: break-word; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #666; }
+  th:nth-child(1), td:nth-child(1) { width: 58%; }
+  th:nth-child(2), td:nth-child(2) { width: 22%; }
+  th:nth-child(3), td:nth-child(3) { width: 12%; }
+  th:nth-child(4), td:nth-child(4) { width: 8%; }
+  .summary { margin: 18px 0; font-size: 14px; color: #333; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Deloitte · Sales Domain</div>
+  <h1>Task Tracking <em>Report</em></h1>
+  <div class="meta">
+    ${escapeHtml(generatedText)}<br>
+    Due Date Reference Week: ${escapeHtml(referenceWeek)}<br>
+    Tasks in report: ${visibleTasks.length}
+  </div>
+  <hr class="divider">
+  <table>
+    <thead>
+      <tr>
+        <th>Task</th>
+        <th>Owner</th>
+        <th>Due Date</th>
+        <th>Progress</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows || '<tr><td colspan="4" style="color:#777;font-style:italic;">No tasks available for the current filters.</td></tr>'}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+  const blob = new Blob([reportHtml], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const dd = String(today.getDate()).padStart(2, "0");
+
+  link.href = url;
+  link.download = `sales-domain-task-tracking-report-${yyyy}-${mm}-${dd}.html`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 
 setGeneratedDate();
 updateTrendCircle();
