@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Sales Domain Task Tracking Report</title>
 
+<!-- SheetJS supports Excel parsing. Internet is required for XLSX upload unless this library is bundled locally. CSV works without it. -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
 <style>
 :root {
   --black:#000;
@@ -12,12 +15,15 @@
   --gray:#5f6368;
   --light:#f7f7f7;
   --border:#d8d8d8;
+  --red:#d92d20;
+  --yellow:#f2c94c;
 }
 
 body {
   margin:0;
-  font-family:Arial, sans-serif;
+  font-family:Arial, Helvetica, sans-serif;
   background:#fff;
+  color:#000;
 }
 
 .page {
@@ -32,6 +38,7 @@ body {
   text-transform:uppercase;
   color:#666;
   margin-bottom:20px;
+  font-weight:700;
 }
 
 .dot {
@@ -47,21 +54,30 @@ body {
   display:flex;
   justify-content:space-between;
   align-items:flex-start;
+  gap:30px;
 }
 
 h1 {
   font-size:56px;
   font-weight:300;
   margin:0;
+  letter-spacing:-1px;
 }
 
 h1 em {
   color:var(--green);
   font-family:Georgia, serif;
+  font-weight:700;
 }
 
 .meta {
   text-align:right;
+  color:#666;
+  line-height:1.5;
+}
+
+.meta strong {
+  color:#000;
 }
 
 .circle {
@@ -71,12 +87,27 @@ h1 em {
   border-radius:50%;
 }
 
+.circle.green-trend {
+  border-color: var(--green);
+  background: rgba(134,188,37,0.08);
+}
+
+.circle.yellow-trend {
+  border-color: var(--yellow);
+  background: rgba(242,201,76,0.12);
+}
+
+.circle.red-trend {
+  border-color: var(--red);
+  background: rgba(217,45,32,0.10);
+}
+
+
 .divider {
+  border:0;
   border-top:3px solid black;
   margin:30px 0;
 }
-
-/* Upload cards */
 
 .actions {
   display:grid;
@@ -87,11 +118,13 @@ h1 em {
 
 .card {
   border:2px dashed var(--border);
-  padding:25px;
+  padding:28px;
   display:flex;
-  gap:20px;
+  gap:22px;
   align-items:center;
   cursor:pointer;
+  min-height:130px;
+  background:#fff;
 }
 
 .card:hover {
@@ -100,28 +133,37 @@ h1 em {
 }
 
 .icon {
-  width:50px;
-  height:50px;
+  width:56px;
+  height:56px;
   border:2px solid var(--border);
   display:flex;
   align-items:center;
   justify-content:center;
-  font-size:24px;
+  font-size:28px;
 }
 
 .card h3 {
-  margin:0;
-  font-size:14px;
+  margin:0 0 8px;
+  font-size:15px;
   text-transform:uppercase;
   color:var(--gray);
+  letter-spacing:.08em;
 }
 
 .card p {
-  margin:5px 0 0;
-  font-size:18px;
+  margin:0;
+  font-size:22px;
 }
 
-/* Form panels */
+.helper {
+  margin-top:8px;
+  font-size:13px;
+  color:#777;
+}
+
+input[type="file"] {
+  display:none;
+}
 
 .panel {
   display:none;
@@ -131,7 +173,9 @@ h1 em {
   margin-bottom:20px;
 }
 
-.panel.active { display:block; }
+.panel.active {
+  display:block;
+}
 
 .grid {
   display:grid;
@@ -140,9 +184,10 @@ h1 em {
 }
 
 input, select {
-  padding:8px;
+  padding:9px;
   border:1px solid var(--border);
   width:100%;
+  box-sizing:border-box;
 }
 
 button {
@@ -152,186 +197,511 @@ button {
   color:white;
   border:none;
   cursor:pointer;
+  font-weight:700;
 }
 
-/* Table */
+.metrics {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:15px;
+  margin:24px 0;
+}
+
+.metric {
+  background:#f7f7f7;
+  border-top:4px solid var(--green);
+  padding:16px;
+}
+
+.metric .num {
+  font-size:34px;
+  font-weight:300;
+}
+
+.metric .label {
+  color:#666;
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  font-weight:700;
+}
 
 table {
   width:100%;
   border-collapse:collapse;
+  border-top:2px solid #000;
 }
 
 th {
   text-align:left;
-  padding:10px;
+  padding:11px;
   font-size:12px;
   text-transform:uppercase;
+  letter-spacing:.08em;
+  color:#666;
   border-bottom:1px solid #ddd;
 }
 
 td {
   padding:12px;
   border-bottom:1px solid #eee;
+  vertical-align:top;
 }
 
 .rag {
-  padding:4px 8px;
+  padding:5px 9px;
   color:#fff;
   font-size:12px;
+  font-weight:700;
+  display:inline-block;
+  text-transform:uppercase;
 }
 
 .green {background:var(--green);}
-.yellow {background:#f2c94c;color:#000;}
-.red {background:#d92d20;}
+.yellow {background:var(--yellow);color:#000;}
+.red {background:var(--red);}
+.gray {background:#666;}
 
+.status-message {
+  margin:12px 0 22px;
+  color:#666;
+  font-size:14px;
+}
+
+@media(max-width:1000px){
+  .actions,.grid,.metrics {grid-template-columns:1fr;}
+  .header {flex-direction:column;}
+  .meta {text-align:left;}
+  .circle {display:none;}
+}
 </style>
 </head>
 
 <body>
-
 <div class="page">
 
-<div class="eyebrow"><span class="dot"></span>Deloitte · Sales Domain · FY26 - P12</div>
+  <div class="eyebrow"><span class="dot"></span>Deloitte · Sales Domain · </div>
 
-<div class="header">
-  <h1>Task Tracking <em>Report</em></h1>
-  <div class="meta">
-    <strong>Week of Apr 24, 2026</strong><br>
-    Generated automatically
+  <div class="header">
+    <h1>Task Tracking <em>Report</em></h1>
+    <div class="meta">
+      <strong>Week of Apr 24, 2026</strong><br>
+      <span id="generated">Generated automatically</span>
+    </div>
+    <div class="circle" id="trendCircle" title="Trend will update after task upload"></div>
   </div>
-  <div class="circle"></div>
-</div>
 
-<hr class="divider"/>
+  <hr class="divider"/>
 
-<!-- Cards -->
+  <div class="actions">
+    <div class="card" onclick="document.getElementById('taskFile').click()">
+      <div class="icon">↥</div>
+      <div>
+        <h3>Task Intake</h3>
+        <p>Upload Loop / Planner tasks</p>
+        <div class="helper">Accepts CSV or Excel (.xlsx)</div>
+      </div>
+    </div>
 
-<div class="actions">
-  <div class="card" onclick="openPanel('taskPanel')">
-    <div class="icon">＋</div>
-    <div>
-      <h3>Task Intake</h3>
-      <p>Add new task</p>
+    <div class="card" onclick="toggleManual()">
+      <div class="icon">＋</div>
+      <div>
+        <h3>Manual Task Entry</h3>
+        <p>Add task manually</p>
+        <div class="helper">Use for ad hoc actions captured live</div>
+      </div>
     </div>
   </div>
 
-  <div class="card" onclick="openPanel('trackingPanel')">
-    <div class="icon">↥</div>
-    <div>
-      <h3>Task Tracking Data</h3>
-      <p>Add health & progress</p>
+  <input id="taskFile" type="file" accept=".csv,.xlsx,.xls" onchange="handleFile(event,'Task Intake')" />
+  
+
+  <div class="status-message" id="message">Use Task Intake to upload CSV/Excel data or Manual Task Entry to add one-off tasks. The top-right trend circle updates dynamically from all entered data.</div>
+
+  <div class="panel" id="manualPanel">
+    <div class="grid">
+      <input id="manualTask" placeholder="Task">
+      <input id="manualOwner" placeholder="Owner">
+      <input id="manualDate" type="date">
+      <select id="manualSource">
+        <option>Loop</option>
+        <option>Planner</option>
+        <option>Manual Intake</option>
+      </select>
+      <select id="manualStatus">
+        <option>Green</option>
+        <option>Yellow</option>
+        <option>Red</option>
+        <option>Not Started</option>
+      </select>
     </div>
+    <button onclick="saveManualTask()">Save Manual Task</button>
   </div>
-</div>
 
-<!-- Task Form -->
 
-<div id="taskPanel" class="panel">
-  <div class="grid">
-    <input id="taskName" placeholder="Task">
-    <input id="owner" placeholder="Owner">
-    <input id="date" type="date">
-    <select id="source">
-      <option>Loop</option>
-      <option>Planner</option>
-    </select>
-    <select id="status">
-      <option>Green</option>
-      <option>Yellow</option>
-      <option>Red</option>
-    </select>
+  <div class="metrics">
+    <div class="metric"><div class="num" id="total">0</div><div class="label">Total Tasks</div></div>
+    <div class="metric"><div class="num" id="green">0</div><div class="label">Green</div></div>
+    <div class="metric"><div class="num" id="yellow">0</div><div class="label">Yellow</div></div>
+    <div class="metric"><div class="num" id="red">0</div><div class="label">Red</div></div>
   </div>
-  <button onclick="saveTask()">Save Task</button>
-</div>
 
-<!-- Tracking Form -->
-
-<div id="trackingPanel" class="panel">
-  <div class="grid">
-    <input id="tTask" placeholder="Task">
-    <input id="tOwner" placeholder="Owner">
-    <select id="tStatus">
-      <option>Green</option>
-      <option>Yellow</option>
-      <option>Red</option>
-    </select>
-    <input id="progress" placeholder="Progress %">
-    <input id="next" placeholder="Next Step">
-  </div>
-  <button onclick="saveTracking()">Save Tracking</button>
-</div>
-
-<!-- Table -->
-
-<table>
-<thead>
-<tr>
-<th>Source</th>
-<th>Task</th>
-<th>Owner</th>
-<th>Due</th>
-<th>Status</th>
-<th>Progress</th>
-<th>Next Step</th>
-</tr>
-</thead>
-
-<tbody id="body"></tbody>
-</table>
+  <table>
+    <thead>
+      <tr>
+        <th>Source</th>
+        <th>Task</th>
+        <th>Owner</th>
+        <th>Due Date</th>
+        <th>Health</th>
+        <th>Priority</th>
+        <th>Progress</th>
+        <th>Next Step</th>
+      </tr>
+    </thead>
+    <tbody id="body">
+      <tr><td colspan="8" style="color:#777;font-style:italic;">No task data uploaded yet.</td></tr>
+    </tbody>
+  </table>
 
 </div>
 
 <script>
-let tasks=[];
+let tasks = [];
 
-function openPanel(id){
-  document.getElementById('taskPanel').classList.remove('active');
-  document.getElementById('trackingPanel').classList.remove('active');
-  document.getElementById(id).classList.add('active');
+function setGeneratedDate(){
+  const now = new Date();
+  document.getElementById("generated").textContent =
+    "Generated " + now.toLocaleString([], {month:"short", day:"numeric", year:"numeric", hour:"2-digit", minute:"2-digit"});
 }
 
-function saveTask(){
-  tasks.unshift({
-    source:source.value,
-    task:taskName.value,
-    owner:owner.value,
-    date:date.value,
-    status:status.value,
-    progress:"-",
-    next:"-"
+function handleFile(event, defaultSource){
+  const file = event.target.files[0];
+  if(!file) return;
+
+  const name = file.name.toLowerCase();
+
+  if(name.endsWith(".csv")){
+    const reader = new FileReader();
+    reader.onload = e => {
+      const rows = csvToObjects(e.target.result);
+      ingestRows(rows, defaultSource, file.name);
+    };
+    reader.readAsText(file);
+  } else if(name.endsWith(".xlsx") || name.endsWith(".xls")){
+    const reader = new FileReader();
+    reader.onload = e => {
+      if(typeof XLSX === "undefined"){
+        alert("Excel support needs the SheetJS library. Please connect to the internet or upload CSV instead.");
+        return;
+      }
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type:"array"});
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(firstSheet, {defval:""});
+      ingestRows(rows, defaultSource, file.name);
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    alert("Please upload a CSV or Excel file.");
+  }
+
+  event.target.value = "";
+}
+
+function csvToObjects(csv){
+  const lines = csv.split(/\r?\n/).filter(line => line.trim() !== "");
+  if(lines.length < 2) return [];
+
+  const headers = parseCSVLine(lines[0]).map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const values = parseCSVLine(line);
+    const obj = {};
+    headers.forEach((h,i) => obj[h] = values[i] || "");
+    return obj;
   });
+}
+
+function parseCSVLine(line){
+  const result = [];
+  let current = "";
+  let insideQuotes = false;
+
+  for(let i=0; i<line.length; i++){
+    const char = line[i];
+    const next = line[i+1];
+
+    if(char === '"' && insideQuotes && next === '"'){
+      current += '"';
+      i++;
+    } else if(char === '"'){
+      insideQuotes = !insideQuotes;
+    } else if(char === "," && !insideQuotes){
+      result.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current);
+  return result;
+}
+
+function ingestRows(rows, defaultSource, fileName){
+  let added = 0;
+
+  rows.forEach(row => {
+    const item = normalizeRow(row, defaultSource);
+    if(item.task){
+      tasks.push(item);
+      added++;
+    }
+  });
+
+  document.getElementById("message").textContent =
+    added + " row(s) uploaded from " + fileName + ".";
+
   render();
 }
 
-function saveTracking(){
+function normalizeRow(row, defaultSource){
+  const keys = Object.keys(row);
+  const get = (...names) => {
+    for(const name of names){
+      const key = keys.find(k => clean(k) === clean(name));
+      if(key && row[key] !== undefined && String(row[key]).trim() !== "") return String(row[key]).trim();
+    }
+    return "";
+  };
+
+  let status = get("Health","RAG","Status","Task Status","Bucket","Progress Status") || "Not Started";
+
+  return {
+    source: get("Source","Origin","System") || defaultSource,
+    task: get("Task","Task Name","Title","Action Item","Action","Name","Description"),
+    owner: get("Owner","Assigned To","Assignee","Responsible","Action Owner") || "TBD",
+    date: get("Due Date","Due","Deadline","Target Date","Finish Date") || "TBD",
+    status: normalizeStatus(status),
+    priority: get("Priority","Importance") || "TBD",
+    progress: get("Progress","Percent Complete","% Complete","Completion","Complete") || "TBD",
+    next: get("Next Step","Next Action","Notes","Comments","Description") || "TBD"
+  };
+}
+
+function clean(value){
+  return String(value).toLowerCase().replace(/[^a-z0-9]/g,"");
+}
+
+function normalizeStatus(value){
+  const v = String(value).toLowerCase();
+  if(v.includes("green") || v.includes("complete") || v.includes("on track")) return "Green";
+  if(v.includes("yellow") || v.includes("risk") || v.includes("in progress")) return "Yellow";
+  if(v.includes("red") || v.includes("block") || v.includes("late")) return "Red";
+  return value || "Not Started";
+}
+
+function toggleManual(){
+  document.getElementById("manualPanel").classList.toggle("active");
+}
+
+function saveManualTask(){
+  if(!manualTask.value.trim()){
+    alert("Please enter a task.");
+    return;
+  }
+
   tasks.unshift({
-    source:"Tracking",
-    task:tTask.value,
-    owner:tOwner.value,
-    date:"-",
-    status:tStatus.value,
-    progress:progress.value,
-    next:next.value
+    source: manualSource.value,
+    task: manualTask.value.trim(),
+    owner: manualOwner.value.trim() || "TBD",
+    date: manualDate.value || "TBD",
+    status: manualStatus.value,
+    priority: "TBD",
+    progress: "TBD",
+    next: "TBD"
   });
+
+  manualTask.value = "";
+  manualOwner.value = "";
+  manualDate.value = "";
   render();
+}
+
+function ragClass(status){
+  const s = String(status).toLowerCase();
+  if(s === "green") return "green";
+  if(s === "yellow") return "yellow";
+  if(s === "red") return "red";
+  return "gray";
+}
+
+function escapeHtml(value){
+  return String(value)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+
+
+function parseDateValue(value){
+  if(!value || value === "TBD" || value === "-") return null;
+
+  // Excel serial date support
+  if(!isNaN(value) && Number(value) > 25000){
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    return new Date(excelEpoch.getTime() + Number(value) * 86400000);
+  }
+
+  const parsed = new Date(value);
+  if(!isNaN(parsed.getTime())) return parsed;
+
+  return null;
+}
+
+function parseProgressValue(value){
+  if(value === null || value === undefined || value === "" || value === "TBD" || value === "-") return null;
+
+  const raw = String(value).trim();
+
+  // Handles Excel percent values like 0.75
+  if(!isNaN(raw) && Number(raw) > 0 && Number(raw) <= 1){
+    return Number(raw) * 100;
+  }
+
+  const cleaned = raw.replace("%","").replace(/[^\d.]/g,"");
+  if(cleaned === "" || isNaN(cleaned)) return null;
+
+  return Number(cleaned);
+}
+
+function classifyTaskTrend(task){
+  const status = String(task.status || "").toLowerCase();
+  const priority = String(task.priority || "").toLowerCase();
+  const progress = parseProgressValue(task.progress);
+  const dueDate = parseDateValue(task.date);
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  if(dueDate) dueDate.setHours(0,0,0,0);
+
+  const explicitRed =
+    status.includes("red") ||
+    status.includes("blocked") ||
+    status.includes("overdue") ||
+    status.includes("late") ||
+    status.includes("delayed");
+
+  const explicitYellow =
+    status.includes("yellow") ||
+    status.includes("risk") ||
+    status.includes("in progress") ||
+    status.includes("not started");
+
+  const explicitGreen =
+    status.includes("green") ||
+    status.includes("complete") ||
+    status.includes("completed") ||
+    status.includes("done") ||
+    status.includes("on track");
+
+  const isPastDue = dueDate && dueDate < today;
+  const isComplete = explicitGreen || (progress !== null && progress >= 100);
+  const isVeryIncomplete = progress !== null && progress < 50;
+  const isHighPriority = priority.includes("high") || priority.includes("urgent");
+
+  // Red = materially incomplete / blocked / very low progress on high priority
+  if(explicitRed || (isPastDue && isVeryIncomplete) || (isHighPriority && isVeryIncomplete)){
+    return "red";
+  }
+
+  // Yellow = delayed or at risk, but not materially red
+  if((isPastDue && !isComplete) || explicitYellow || (progress !== null && progress < 100)){
+    return "yellow";
+  }
+
+  return "green";
+}
+
+function updateTrendCircle(){
+  const circle = document.getElementById("trendCircle");
+  if(!circle) return;
+
+  circle.classList.remove("green-trend","yellow-trend","red-trend");
+
+  if(tasks.length === 0){
+    circle.classList.add("green-trend");
+    circle.title = "Trend will update after CSV/Excel upload";
+    return;
+  }
+
+  const trendCounts = { green: 0, yellow: 0, red: 0 };
+
+  tasks.forEach(task => {
+    const trend = classifyTaskTrend(task);
+    trendCounts[trend] += 1;
+  });
+
+  let overallTrend = "green";
+
+  // Overall rule:
+  // Red when red is the largest group, or 40%+ of tasks are red/incomplete.
+  // Yellow when yellow is the largest group, or 40%+ of tasks are yellow/delayed.
+  // Otherwise green.
+  const redShare = trendCounts.red / tasks.length;
+  const yellowShare = trendCounts.yellow / tasks.length;
+
+  if(trendCounts.red >= trendCounts.green && trendCounts.red >= trendCounts.yellow || redShare >= 0.40){
+    overallTrend = "red";
+    circle.title = `Red trend: ${trendCounts.red} of ${tasks.length} tasks are incomplete, blocked, or materially delayed`;
+  } else if(trendCounts.yellow >= trendCounts.green || yellowShare >= 0.40){
+    overallTrend = "yellow";
+    circle.title = `Yellow trend: ${trendCounts.yellow} of ${tasks.length} tasks are delayed, in progress, or at risk`;
+  } else {
+    overallTrend = "green";
+    circle.title = `Green trend: ${trendCounts.green} of ${tasks.length} tasks are on time or complete`;
+  }
+
+  circle.classList.add(overallTrend + "-trend");
 }
 
 function render(){
-  body.innerHTML="";
-  tasks.forEach(t=>{
-    body.innerHTML+=`
-    <tr>
-      <td>${t.source}</td>
-      <td>${t.task}</td>
-      <td>${t.owner}</td>
-      <td>${t.date}</td>
-      <td><span class="rag ${t.status.toLowerCase()}">${t.status}</span></td>
-      <td>${t.progress}</td>
-      <td>${t.next}</td>
-    </tr>`;
-  });
-}
-</script>
+  const tbody = document.getElementById("body");
+  tbody.innerHTML = "";
 
+  if(tasks.length === 0){
+    tbody.innerHTML = '<tr><td colspan="8" style="color:#777;font-style:italic;">No task data uploaded yet.</td></tr>';
+  }
+
+  tasks.forEach(t => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${escapeHtml(t.source)}</td>
+        <td>${escapeHtml(t.task)}</td>
+        <td>${escapeHtml(t.owner)}</td>
+        <td>${escapeHtml(t.date)}</td>
+        <td><span class="rag ${ragClass(t.status)}">${escapeHtml(t.status)}</span></td>
+        <td>${escapeHtml(t.priority)}</td>
+        <td>${escapeHtml(t.progress)}</td>
+        <td>${escapeHtml(t.next)}</td>
+      </tr>`;
+  });
+
+  const trendCounts = { green: 0, yellow: 0, red: 0 };
+  tasks.forEach(t => trendCounts[classifyTaskTrend(t)] += 1);
+
+  total.textContent = tasks.length;
+  green.textContent = trendCounts.green;
+  yellow.textContent = trendCounts.yellow;
+  red.textContent = trendCounts.red;
+  updateTrendCircle();
+}
+
+setGeneratedDate();
+updateTrendCircle();
+</script>
 </body>
 </html>
