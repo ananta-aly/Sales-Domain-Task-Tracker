@@ -312,6 +312,37 @@ td {
   background:#000;
 }
 
+.reference-week {
+  display:grid;
+  grid-template-columns: 260px 1fr;
+  gap:14px;
+  align-items:end;
+  background:#f7f7f7;
+  border-left:4px solid var(--green);
+  padding:16px;
+  margin:0 0 22px;
+}
+
+.reference-week label {
+  display:block;
+  color:#666;
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  font-weight:700;
+  margin-bottom:6px;
+}
+
+.reference-week .helper-text {
+  color:#666;
+  font-size:13px;
+  line-height:1.4;
+}
+
+@media(max-width:1000px){
+  .reference-week {grid-template-columns:1fr;}
+}
+
 @media(max-width:1000px){
   .filter-bar {grid-template-columns:1fr;}
 }
@@ -341,6 +372,17 @@ td {
 
   <hr class="divider"/>
 
+
+  <div class="reference-week">
+    <div>
+      <label for="referenceWeekStart">Due Date Reference Week</label>
+      <input id="referenceWeekStart" type="date" onchange="render()" />
+    </div>
+    <div class="helper-text">
+      Select the Monday of the week this Loop / Planner update applies to. Weekday due dates like Wed, Thu, Fri, plus ASAP and today, will map to this selected week.
+    </div>
+  </div>
+
   <div class="actions">
     <div class="card" onclick="document.getElementById('taskFile').click()">
       <div class="icon">↥</div>
@@ -364,7 +406,7 @@ td {
   <input id="taskFile" type="file" accept=".pdf,.csv,.xlsx,.xls" onchange="handleFile(event,'Task Intake')" />
   
 
-  <div class="status-message" id="message">Use Task Intake to upload PDF, CSV, or Excel data, or Manual Task Entry to add one-off tasks. The top-right trend circle updates dynamically from all entered data.</div>
+  <div class="status-message" id="message">Select the Due Date Reference Week first, then upload PDF, CSV, or Excel data, or use Manual Task Entry. The top-right trend circle updates dynamically from all entered data.</div>
 
   <div class="panel" id="manualPanel">
     <div class="grid">
@@ -739,11 +781,18 @@ function formatDateMMDDYY(date){
 }
 
 function getUploadWeekMonday(){
+  const selectedWeekStart = document.getElementById("referenceWeekStart")?.value;
+
+  if(selectedWeekStart){
+    const selectedDate = new Date(selectedWeekStart + "T00:00:00");
+    selectedDate.setHours(0,0,0,0);
+    return selectedDate;
+  }
+
   const today = new Date();
   today.setHours(0,0,0,0);
 
-  // Monday-based week. If upload happens on Friday 04/24/26,
-  // Monday is 04/20/26 and Friday is 04/24/26.
+  // Fallback: Monday-based current week when no reference week is selected.
   const day = today.getDay(); // Sun=0, Mon=1, ... Sat=6
   const diffToMonday = day === 0 ? -6 : 1 - day;
 
